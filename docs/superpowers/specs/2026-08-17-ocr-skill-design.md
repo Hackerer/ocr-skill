@@ -114,7 +114,7 @@ ocr/                                # ~/.agents/skills/ocr（符号链接到本�
 ### 3.3 环境
 
 - Python 3.12.12（uv 管理，本机已缓存，规避 3.14 与 onnxruntime 的不兼容）
-- 依赖：`rapidocr[onnxruntime]>=3.9`、`pymupdf`、`pillow`、`numpy`
+- 依赖：`rapidocr>=3.9`、`onnxruntime`（⚠️ rapidocr 3.9.2 无任何 extras，`[onnxruntime]` 写法不存在，需显式安装）、`pymupdf`、`pillow`、`numpy`
 - venv 位于 `~/.agents/skills/ocr/.venv`（随技能迁移）
 
 ## 4. 数据流与输出格式
