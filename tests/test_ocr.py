@@ -110,3 +110,45 @@ def test_group_rows_boundary_equal_threshold_same_row():
     rows = group_into_rows(items)
     assert len(rows) == 1
     assert sorted(r["text"] for r in rows[0]) == ["上", "下"]
+
+
+from ocr import build_tsv, render_json, render_text
+
+
+def test_render_text_low_conf_marked():
+    items = [_item("清楚", [10, 10, 80, 30]), _item("模糊", [10, 40, 80, 60])]
+    items[1]["conf"] = 0.3
+    items[1]["low_conf"] = True
+    out = render_text(items)
+    assert "清楚" in out
+    assert "⟦低置信⟧ 模糊" in out
+
+
+def test_render_text_empty():
+    assert render_text([]) == "未检测到文字"
+
+
+def test_build_tsv_2x2():
+    items = [
+        _item("A1", [10, 10, 100, 30]),
+        _item("B1", [200, 10, 300, 30]),
+        _item("A2", [10, 50, 100, 70]),
+        _item("B2", [200, 50, 300, 70]),
+    ]
+    assert build_tsv(items) == "A1\tB1\nA2\tB2"
+
+
+def test_build_tsv_empty_cell():
+    items = [
+        _item("A1", [10, 10, 100, 30]),
+        _item("A2", [10, 50, 100, 70]),
+        _item("B2", [200, 50, 300, 70]),   # B1 缺失 → 第一行第二列留空
+    ]
+    assert build_tsv(items) == "A1\t\nA2\tB2"
+
+
+def test_render_json_utf8():
+    results = [{"file": "a.png", "page": 1, "width": 10, "height": 10, "lines": [_item("中文", [0, 0, 5, 5])]}]
+    out = render_json(results)
+    assert "中文" in out          # ensure_ascii=False：中文不转义
+    assert "\\u" not in out

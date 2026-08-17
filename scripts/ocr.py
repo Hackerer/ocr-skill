@@ -103,3 +103,42 @@ def sort_lines_reading_order(items: List[Dict]) -> List[Dict]:
         row.sort(key=lambda i: i["box"][0])
     rows.sort(key=lambda r: sum(i["box"][1] for i in r) / len(r))
     return [it for row in rows for it in row]
+
+
+# ---------------------------------------------------------------- 三模式输出
+def render_text(items: List[Dict]) -> str:
+    """模式一：阅读顺序纯文本（默认）。低置信文本保留并加 ⟦低置信⟧ 前缀。"""
+    if not items:
+        return "未检测到文字"
+    ordered = sort_lines_reading_order(items)
+    lines: List[str] = []
+    prev_y2 = None
+    for it in ordered:
+        prefix = "⟦低置信⟧ " if it["conf"] < LOW_CONF_THRESHOLD else ""
+        if prev_y2 is not None and it["box"][1] - prev_y2 > 24:
+            lines.append("")          # 段落/块分隔
+        lines.append(prefix + it["text"])
+        prev_y2 = it["box"][3]
+    return "\n".join(lines)
+
+
+def render_json(results: List[Dict]) -> str:
+    """模式二：JSON（UTF-8，中文不转义）。"""
+    return json.dumps(results, ensure_ascii=False, indent=2)
+
+
+def build_tsv(items: List[Dict]) -> str:
+    """模式三：表格 TSV。列边界 = 全部 x1 的一维聚类中心；单元格 = 行带 × 列带。"""
+    if not items:
+        return ""
+    x1s = sorted({round(i["box"][0], 1) for i in items})
+    col_centers = cluster_1d(x1s, gap=12.0)
+    out: List[str] = []
+    for row in group_into_rows(items):
+        cells = [""] * len(col_centers)
+        for it in row:
+            cx = (it["box"][0] + it["box"][2]) / 2
+            idx = min(range(len(col_centers)), key=lambda j: abs(col_centers[j] - cx))
+            cells[idx] = (cells[idx] + " " + it["text"]).strip()
+        out.append("\t".join(cells))
+    return "\n".join(out)
