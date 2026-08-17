@@ -118,7 +118,6 @@ from ocr import build_tsv, render_json, render_text
 def test_render_text_low_conf_marked():
     items = [_item("清楚", [10, 10, 80, 30]), _item("模糊", [10, 40, 80, 60])]
     items[1]["conf"] = 0.3
-    items[1]["low_conf"] = True
     out = render_text(items)
     assert "清楚" in out
     assert "⟦低置信⟧ 模糊" in out
@@ -152,3 +151,46 @@ def test_render_json_utf8():
     out = render_json(results)
     assert "中文" in out          # ensure_ascii=False：中文不转义
     assert "\\u" not in out
+
+
+def test_render_text_paragraph_gap():
+    items = [
+        _item("段一", [10, 10, 100, 30]),
+        _item("段二", [10, 70, 100, 90]),     # y1 间距 70-30=40 > 24 → 空行分隔
+        _item("同段", [10, 80, 100, 100]),    # 与段二同行（cy 差 10 < 12）→ 不插空行
+    ]
+    out = render_text(items)
+    assert out == "段一\n\n段二\n同段"
+
+
+def test_render_text_conf_boundary():
+    a = _item("恰好", [10, 10, 80, 30]); a["conf"] = 0.5
+    b = _item("差一点", [10, 40, 80, 60]); b["conf"] = 0.499
+    out = render_text([a, b])
+    assert "恰好" in out and "⟦低置信⟧" not in out.split("恰好")[0]
+    assert "⟦低置信⟧ 差一点" in out
+
+
+def test_build_tsv_wide_cell_stays_in_own_column():
+    items = [
+        _item("宽内容", [10, 10, 260, 30]),   # 右缘越过第二列左缘，但左缘 x1=10 → 第一列
+        _item("右列", [250, 10, 300, 30]),
+    ]
+    assert build_tsv(items) == "宽内容\t右列"
+
+
+def test_build_tsv_same_cell_order_by_x():
+    items = [
+        _item("后", [150, 10, 200, 30]),
+        _item("先", [140, 10, 160, 30]),      # x1 与"后"差 10 < COLUMN_GAP_PX → 同列；按 x 排序后"先"在前
+    ]
+    assert build_tsv(items) == "先 后"
+
+
+def test_render_json_roundtrip():
+    import json as _json
+    results = [{"file": "a.png", "page": 1, "width": 10, "height": 10,
+                "lines": [_item("中文", [0, 0, 5, 5])]}]
+    parsed = _json.loads(render_json(results))
+    assert isinstance(parsed, list)
+    assert parsed[0]["lines"][0]["box"] == [0, 0, 5, 5]

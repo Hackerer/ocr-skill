@@ -20,6 +20,8 @@ from PIL import Image
 from rapidocr import ModelType, OCRVersion, RapidOCR
 
 LOW_CONF_THRESHOLD = 0.5
+PARAGRAPH_GAP_PX = 24.0    # render_text 段落分隔阈值：相邻行 y1 间距 > 该值插空行
+COLUMN_GAP_PX = 12.0       # build_tsv 列聚类 gap：x1 差 > 该值分列
 MAX_PDF_PIXELS = 2_000_000
 MODEL_TYPES = {"tiny": ModelType.TINY, "small": ModelType.SMALL, "medium": ModelType.MEDIUM}
 
@@ -115,7 +117,7 @@ def render_text(items: List[Dict]) -> str:
     prev_y2 = None
     for it in ordered:
         prefix = "⟦低置信⟧ " if it["conf"] < LOW_CONF_THRESHOLD else ""
-        if prev_y2 is not None and it["box"][1] - prev_y2 > 24:
+        if prev_y2 is not None and it["box"][1] - prev_y2 > PARAGRAPH_GAP_PX:
             lines.append("")          # 段落/块分隔
         lines.append(prefix + it["text"])
         prev_y2 = it["box"][3]
@@ -128,17 +130,19 @@ def render_json(results: List[Dict]) -> str:
 
 
 def build_tsv(items: List[Dict]) -> str:
-    """模式三：表格 TSV。列边界 = 全部 x1 的一维聚类中心；单元格 = 行带 × 列带。"""
+    """模式三：表格 TSV。列边界 = 全部 x1 的一维聚类（gap=COLUMN_GAP_PX）→ 列中心；
+    单元格 = 行带 × 列带，文本按框左缘 x1 就近落入列带（距离相等取左侧列）。"""
     if not items:
         return ""
     x1s = sorted({round(i["box"][0], 1) for i in items})
-    col_centers = cluster_1d(x1s, gap=12.0)
+    col_centers = cluster_1d(x1s, gap=COLUMN_GAP_PX)
     out: List[str] = []
     for row in group_into_rows(items):
+        row = sorted(row, key=lambda i: i["box"][0])   # 同格多文本按 x 排序（左→右），顺序确定
         cells = [""] * len(col_centers)
         for it in row:
-            cx = (it["box"][0] + it["box"][2]) / 2
-            idx = min(range(len(col_centers)), key=lambda j: abs(col_centers[j] - cx))
+            # 按框左缘 x1 就近落入列带；min 取首个最小下标 → 距离相等时取左侧列
+            idx = min(range(len(col_centers)), key=lambda j: abs(col_centers[j] - it["box"][0]))
             cells[idx] = (cells[idx] + " " + it["text"]).strip()
         out.append("\t".join(cells))
     return "\n".join(out)
