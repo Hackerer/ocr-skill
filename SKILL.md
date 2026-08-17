@@ -48,6 +48,7 @@ token 预算：>3 张图或 >10 页 PDF 时**不要**全量 `--json`；确有布
 - `lines[]` 字段：`text` / `conf` / `font_size`（≈框高）/ `box=[x1,y1,x2,y2]`（原图像素）/ `low_conf`
 - 字号→层级：框高最大的 1-2 个是标题/主按钮；`box` 对齐→导航/列表/卡片
 - 多栏（报纸/dashboard）：按 `box.x` 分栏后再按 y 排序，**不要**直接按输出顺序混读
+详细字段定义见 `references/output-format.md`（按需加载）
 
 ### 表格 TSV（--table）
 - 空单元格即留空；**表头行由你根据内容猜测并标注**；遇到合并单元格/斜线等复杂表格，改用 `--json` 按坐标自行推理
@@ -61,6 +62,7 @@ token 预算：>3 张图或 >10 页 PDF 时**不要**全量 `--json`；确有布
 - `palette` 主色 → 品牌/主题一致性判断
 - `contrast_issues` 只含未达标块；通过 AA 或无法分离前景/背景（如纯色块）的文本不出现
 - ⚠️ `contrast_issues` 基于文本块像素采样，低置信文本的框可能偏移导致颜色误采——发现可疑条目时结合 `ocr.py --json` 的 `conf` 复核
+完整字段示例见 `references/output-format.md`；布局与 UI 结构推断步骤见 `references/layout-guide.md`（按需加载）
 
 ## 边界与常见问题
 
