@@ -84,7 +84,7 @@ def test_engine_params_match_ocr():
 
 
 from PIL import Image
-from analyze import alignment_notes, dominant_colors, font_size_clusters
+from analyze import alignment_notes, cluster_centers, dominant_colors, font_size_clusters
 
 
 def _item(text, box):
@@ -123,3 +123,57 @@ def test_dominant_colors_role_bg():
     assert palette[0]["hex"] == "#1F2937"
     assert palette[0]["role"] == "bg"
     assert palette[0]["pct"] == 100.0
+
+
+def test_font_size_clusters_chained_no_member_loss():
+    # 链式簇 {12,16,20}：相邻差 4,4 ≤ gap 6 → 单簇，三个成员全部保留
+    items = [_item("a", [10, 10, 30, 22]),   # 12px
+             _item("b", [10, 30, 30, 46]),   # 16px
+             _item("c", [10, 50, 30, 70])]   # 20px
+    clusters = font_size_clusters(items)
+    assert len(clusters) == 1
+    assert clusters[0]["count"] == 3
+    assert clusters[0]["consistent"] is True
+    assert sorted(clusters[0]["texts"]) == ["a", "b", "c"]
+
+
+def test_alignment_right_and_center():
+    items = [
+        _item("A", [40, 10, 200, 30]),    # 右缘 200，中心 120
+        _item("B", [60, 50, 200, 70]),    # 右缘 200，中心 130
+        _item("C", [80, 90, 200, 110]),   # 右缘 200，中心 140
+        _item("D", [300, 10, 400, 30]),   # 离群
+        _item("E", [20, 130, 220, 150]),  # 中心 120
+        _item("F", [0, 170, 240, 190]),   # 中心 120
+    ]
+    notes = alignment_notes(items)
+    right = [n for n in notes if n["type"] == "right_align_group"]
+    assert any(n["elements"] >= 3 and abs(n["x"] - 200) < 5 for n in right)
+    center = [n for n in notes if n["type"] == "center_align_group"]
+    assert any(n["elements"] >= 3 and abs(n["x"] - 120) < 5 for n in center)
+
+
+def test_alignment_min_group_boundary():
+    items = [_item("A", [40, 10, 100, 30]), _item("B", [40, 50, 100, 70])]
+    assert alignment_notes(items) == []      # 2 元素 < min_group 3
+
+
+def test_dominant_colors_two_colors_5050():
+    import numpy as _np
+    from PIL import Image as _Image
+    arr = _np.zeros((100, 100, 3), dtype=_np.uint8)
+    arr[:, :50] = (255, 0, 0)
+    arr[:, 50:] = (0, 0, 255)
+    palette = dominant_colors(_Image.fromarray(arr), n=5)
+    assert len(palette) == 2
+    assert palette[0]["pct"] == 50.0 and palette[1]["pct"] == 50.0
+    assert palette[0]["hex"] in ("#FF0000", "#0000FF")
+
+
+def test_cluster_centers_matches_ocr_cluster_1d():
+    # 防漂移：analyze 的聚类行为必须与 ocr.py 一致（自包含设计的代价）
+    from ocr import cluster_1d
+    from analyze import cluster_centers
+    samples = [[1.0, 2.0, 50.0, 51.0], [42.0], [], [10.0, 20.0], [51.0, 1.0, 50.0, -5.0, 2.0]]
+    for s in samples:
+        assert cluster_centers(s, gap=10.0) == cluster_1d(s, gap=10.0)
