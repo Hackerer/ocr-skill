@@ -38,6 +38,8 @@ PP-OCRv6 在 rapidocr 中是多语种统一模型（`lang_type` 不影响选择�
 | `small` | multi_PP-OCRv6_det_small | multi_PP-OCRv6_rec_small | 均衡 |
 | `medium` | multi_PP-OCRv6_det_medium | multi_PP-OCRv6_rec_medium | **默认（推荐）**，~34.5M 参数级，准确率最高 |
 
+CLI 提供 `--model-type tiny|small|medium`（默认 medium）与 `--fast` 快捷参数（等价 `--model-type small`）。
+
 模型下载源：ModelScope（`https://www.modelscope.cn/models/RapidAI/RapidOCR`），SHA256 校验，国内可直连。
 
 ### 2.2 引擎配置
@@ -152,6 +154,8 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
 - 复杂表格（合并单元格/斜线）输出"原始 JSON 兜底"提示，LLM 从 bbox 自行推理
 
 ### 4.3 analyze.py 输出契约（审查事实清单，JSON）
+
+**自包含设计**：analyze.py 内部复用 rapidocr 完成检测+识别拿到文本块（含 bbox/字号），再叠加像素分析，一条命令完成全部四项检查，不与 ocr.py 产生调用耦合（避免 LLM 为了审查要跑两次脚本）。
 
 ```json
 {
