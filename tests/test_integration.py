@@ -1,6 +1,4 @@
 """集成测试：真实调用 PP-OCRv6（需先跑过 --smoke 完成模型下载）"""
-import sys
-
 from image_factory import make_text_image, make_ui_image
 from ocr import build_engine, ocr_file, sort_lines_reading_order, warmup
 
@@ -35,8 +33,9 @@ def test_chinese_and_reading_order(tmp_path):
     ordered = sort_lines_reading_order(
         [ln for r in results for ln in r["lines"]]
     )
-    first = ordered[0]["text"]
-    assert "第一行" in first or "标题" in first or "行" in first
+    assert len(ordered) >= 2
+    assert "第一行" in ordered[0]["text"]
+    assert "第二行" in ordered[1]["text"]
     joined = " ".join(_texts(results))
     assert "第二行" in joined or "正文" in joined
 
@@ -44,8 +43,10 @@ def test_chinese_and_reading_order(tmp_path):
 def test_json_mode_has_coords(tmp_path):
     p = make_text_image(tmp_path / "j.png")
     results = ocr_file(get_engine(), p)
+    assert len(results) == 1
     r = results[0]
     assert r["width"] > 0 and r["height"] > 0
+    assert r["lines"]
     for ln in r["lines"]:
         assert len(ln["box"]) == 4
         assert ln["box"][0] < ln["box"][2] and ln["box"][1] < ln["box"][3]
@@ -54,7 +55,7 @@ def test_json_mode_has_coords(tmp_path):
 
 
 def test_pdf_multi_page(tmp_path):
-    import fitz
+    import pymupdf as fitz
     from ocr import load_images
     pdf = tmp_path / "two.pdf"
     doc = fitz.open()
@@ -88,6 +89,8 @@ def test_table_mode(tmp_path):
     img.save(p)
     results = ocr_file(get_engine(), str(p))
     tsv = build_tsv([ln for r in results for ln in r["lines"]])
+    assert "名称\t数量\t价格" in tsv
+    assert "苹果\t3\t9.90" in tsv
     assert "苹果" in tsv
     assert "9.90" in tsv
     assert len(tsv.splitlines()) >= 2

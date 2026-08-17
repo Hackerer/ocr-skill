@@ -1,9 +1,10 @@
-"""测试素材生成：确定性绘制文本/UI 图片（macOS 字体优先，兼容 Linux）"""
+"""测试素材生成：确定性绘制文本/UI 图片（macOS 优先；Linux 上仅英文可用，DejaVu 无 CJK 字形）"""
 from PIL import Image, ImageDraw, ImageFont
 
 FONT_CANDIDATES = [
-    "/System/Library/Fonts/PingFang.ttc",
+    # macOS 15 中 PingFang 已迁移至 FontServices 私有路径，不再使用稳定路径
     "/System/Library/Fonts/STHeiti Light.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
     "/System/Library/Fonts/Supplemental/Songti.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
