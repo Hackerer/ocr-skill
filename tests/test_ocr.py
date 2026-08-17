@@ -56,3 +56,33 @@ def test_cluster_1d_exact_gap_no_split():
 def test_cluster_1d_unsorted_and_negative():
     # gap=5.0：1.0-(-5.0)=6.0 > 5.0 拆出单点簇 -5.0；2.0-1.0=1.0 并入 → [-5.0, 1.5, 50.5]
     assert cluster_1d([51.0, 1.0, 50.0, -5.0, 2.0], gap=5.0) == [-5.0, 1.5, 50.5]
+
+
+from ocr import group_into_rows, sort_lines_reading_order
+
+
+def _item(text, box):
+    return {"text": text, "conf": 0.99, "font_size": box[3] - box[1], "box": box, "low_conf": False}
+
+
+def test_group_rows_two_visual_rows():
+    items = [
+        _item("R1", [200, 10, 300, 30]),   # 同行右侧
+        _item("L1", [10, 10, 100, 30]),    # 同行左侧
+        _item("L2", [10, 50, 100, 70]),    # 下一行左侧
+        _item("R2", [200, 50, 300, 70]),   # 下一行右侧
+    ]
+    rows = group_into_rows(items)
+    assert len(rows) == 2
+    assert sorted(r["text"] for r in rows[0]) == ["L1", "R1"]
+    assert sorted(r["text"] for r in rows[1]) == ["L2", "R2"]
+
+
+def test_reading_order_xy():
+    items = [
+        _item("R1", [200, 10, 300, 30]),
+        _item("L1", [10, 10, 100, 30]),
+        _item("L2", [10, 50, 100, 70]),
+    ]
+    ordered = sort_lines_reading_order(items)
+    assert [i["text"] for i in ordered] == ["L1", "R1", "L2"]

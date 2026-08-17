@@ -77,3 +77,28 @@ def cluster_1d(values: List[float], gap: float = 12.0) -> List[float]:
         else:
             clusters[-1].append(v)
     return [sum(c) / len(c) for c in clusters]
+
+
+def group_into_rows(items: List[Dict]) -> List[List[Dict]]:
+    """按 y 中心聚类成行：行内 y 中心差 < max(行高*0.6, 8) 归一行。"""
+    rows: List[List[Dict]] = []
+    for it in sorted(items, key=lambda i: (i["box"][1] + i["box"][3]) / 2):
+        cy = (it["box"][1] + it["box"][3]) / 2
+        for row in rows:
+            rys = [(r["box"][1] + r["box"][3]) / 2 for r in row]
+            row_h = max(r["box"][3] - r["box"][1] for r in row)
+            if abs(cy - sum(rys) / len(rys)) < max(row_h * 0.6, 8.0):
+                row.append(it)
+                break
+        else:
+            rows.append([it])
+    return rows
+
+
+def sort_lines_reading_order(items: List[Dict]) -> List[Dict]:
+    """阅读顺序（§4.2）：行内按 x 排序，行间按 y 排序。"""
+    rows = group_into_rows(items)
+    for row in rows:
+        row.sort(key=lambda i: i["box"][0])
+    rows.sort(key=lambda r: sum(i["box"][1] for i in r) / len(r))
+    return [it for row in rows for it in row]
