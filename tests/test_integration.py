@@ -52,6 +52,8 @@ def test_json_mode_has_coords(tmp_path):
         assert ln["box"][0] < ln["box"][2] and ln["box"][1] < ln["box"][3]
         assert ln["font_size"] > 0
         assert isinstance(ln["conf"], float)
+    ys = [ln["box"][1] for ln in r["lines"]]
+    assert ys == sorted(ys)
 
 
 def test_pdf_multi_page(tmp_path):

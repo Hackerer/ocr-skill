@@ -185,6 +185,7 @@ def ocr_file(engine: RapidOCR, path: str) -> List[Dict]:
                     "box": [round(v, 1) for v in b],
                     "low_conf": bool(score < LOW_CONF_THRESHOLD),
                 })
+        items = sort_lines_reading_order(items)
         h, w = arr.shape[:2]
         results.append({
             "file": path, "page": page,
