@@ -48,7 +48,7 @@ CLI 提供 `--model-type tiny|small|medium`（默认 medium）与 `--fast` 快�
 ### 2.2 引擎配置
 
 - 推理引擎：`ONNXRUNTIME` + **CPU Provider**。**禁用 CoreML**：RapidOCR 官方 M2 实测（https://raw.githubusercontent.com/RapidAI/RapidOCRDocs/main/docs/blog/posts/inference_engine/compare_coreml_cpu_provider_perf.md）显示 CoreML 对 PP-OCR 系列模型优化不足——检测慢 3.5–6.8 倍、识别慢 3.2–14 倍（精度相同）。M3 同理。
-- 线程：保持默认 `-1`（自动用满 8 核）。
+- 线程：保持默认 `-1`（由 onnxruntime 自动决定，通常为物理核心数）。
 - **显式锁定写法**（3.9.x API 为 `RapidOCR(config_path=None, params: dict)`，点分键 + 枚举值，非关键字参数）：
   ```python
   from rapidocr import RapidOCR, ModelType, OCRVersion
@@ -164,10 +164,12 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
 ```
 - `box` = `[x1, y1, x2, y2]`，为检测多边形（四顶点）的**外接矩形**，原图像素坐标系
 - `font_size` ≈ 框高（供字号层级推断）
+- 编码契约：UTF-8，`ensure_ascii=False`（中文不转义），LLM 直接可读
 - 多文件多页 → 顶层数组
 
 **模式三：表格 TSV（`--table`）**
 - 行聚类(y) × 列聚类(x) → TSV，空单元格留空，表头猜测由 LLM 做
+- 列边界算法：对所有文本框的 x1 与 x2 做一维聚类 → 得列分隔线；单元格 = 行带 × 列带的交集（框跨多列的文本归入跨列单元，由 LLM 解读）
 - 复杂表格（合并单元格/斜线）输出"原始 JSON 兜底"提示，LLM 从 bbox 自行推理
 
 ### 4.3 analyze.py 输出契约（审查事实清单，JSON）
@@ -194,9 +196,9 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
 ```
 
 四项检查实现要点：
-1. **对比度**：文本块中心像素为前景 + 周围环形采样为背景 → WCAG 公式算 ratio → 对照 4.5:1(AA)，只报事实不判断
+1. **对比度**：⚠️ 文本块**中心像素不一定落在文字上**（空心字/描边字/间隙）。正确做法：对文本块内像素做颜色聚类分离"前景/背景"两簇（中心+环形采样互补，多采样点取众数）→ WCAG 公式算 ratio → 对照 4.5:1(AA)，只报事实不判断
 2. **字号一致性**：font_size 聚类，孤立值标 `consistent: false`
-3. **对齐一致性**：x1 聚类，≥3 元素成组，离群元素标出
+3. **对齐一致性**：分别对 x1（左对齐）、x2（右对齐）、中心 x（居中对齐）做一维聚类，≥3 元素成组，离群元素标出
 4. **配色统计**：降采样 k-means(≈5) 主色 + 占比；`role` 为启发式提示（占比最大者标 `"bg"`），仅供 LLM 参考，不作断言
 
 ### 4.4 错误处理
@@ -216,7 +218,7 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
 ```
 ---
 name: ocr
-description: 图片/截图/PDF/扫描件 文字识别与结构理解...
+description: <完整触发词在实施阶段编写 SKILL.md 时产出，遵循 skill-creator 触发优化流程>
 ---
 
 # OCR Skill
@@ -254,6 +256,8 @@ description: 图片/截图/PDF/扫描件 文字识别与结构理解...
 | 边界 | 说明 | 对策 |
 |---|---|---|
 | 输入形式 | 仅支持本地文件路径；URL 需先下载（由模型自行 curl 完成） | SKILL.md 写明 |
+| 多栏布局（双栏报纸/多栏 dashboard） | y 聚类会把左右栏文本混排，阅读顺序不理想 | SKILL.md 提示：改用 `--json`，LLM 按 box.x 坐标自行分栏重排 |
+| 旋转 90° 的图片 | cls 仅处理 0/180° 翻转，90° 旋转识别率下降 | SKILL.md 提示模型先用 PIL/sips 旋转回正再识别 |
 | 图标/图形/颜色语义 | OCR 拿不到 | 布局描述只讲位置/层级/文字，不虚构视觉元素 |
 | 手写体 | 准确率明显下降 | SKILL.md 声明；低置信标记兜底 |
 | 复杂表格（合并单元格/斜线表头） | TSV 会错位 | 自动提示改用原始 JSON 由 LLM 兜底推理 |
