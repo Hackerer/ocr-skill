@@ -81,3 +81,45 @@ def test_engine_params_match_ocr():
     assert ae.cfg.EngineConfig.onnxruntime.use_coreml is False
     assert oe.cfg.EngineConfig.onnxruntime.use_coreml is False
     assert ae.cfg.Rec.ocr_version == oe.cfg.Rec.ocr_version
+
+
+from PIL import Image
+from analyze import alignment_notes, dominant_colors, font_size_clusters
+
+
+def _item(text, box):
+    return {"text": text, "conf": 0.99, "font_size": box[3] - box[1], "box": box}
+
+
+def test_font_size_clusters():
+    items = [
+        _item("标题", [10, 10, 100, 50]),      # 40px ×1 → consistent False
+        _item("按钮1", [10, 60, 100, 84]),     # 24px ×2
+        _item("按钮2", [10, 90, 100, 114]),    # 24px ×2
+    ]
+    clusters = font_size_clusters(items)
+    assert len(clusters) >= 2
+    c40 = next(c for c in clusters if c["size"] > 30)
+    assert c40["count"] == 1 and c40["consistent"] is False
+    c24 = next(c for c in clusters if 20 < c["size"] < 30)
+    assert c24["count"] == 2 and c24["consistent"] is True
+
+
+def test_alignment_left_group():
+    items = [
+        _item("A", [40, 10, 100, 30]),
+        _item("B", [40, 50, 90, 70]),
+        _item("C", [40, 90, 120, 110]),
+        _item("D", [300, 10, 400, 30]),        # 离群
+    ]
+    notes = alignment_notes(items)
+    left = [n for n in notes if n["type"] == "left_align_group"]
+    assert any(n["elements"] >= 3 and abs(n["x"] - 40) < 5 for n in left)
+
+
+def test_dominant_colors_role_bg():
+    img = Image.new("RGB", (100, 100), (31, 41, 55))   # 全 #1F2937
+    palette = dominant_colors(img, n=3)
+    assert palette[0]["hex"] == "#1F2937"
+    assert palette[0]["role"] == "bg"
+    assert palette[0]["pct"] == 100.0

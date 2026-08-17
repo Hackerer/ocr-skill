@@ -130,3 +130,66 @@ def split_fg_bg(box: List[float], img: np.ndarray
     bg = tuple(int(v) for v in centers[order[0]])
     fg = tuple(int(v) for v in centers[order[1]]) if counts[order[1]] > 0 else bg
     return fg, bg
+
+
+# ---------------------------------------------------------------- 字号/对齐/配色
+def cluster_centers(values: List[float], gap: float) -> List[float]:
+    """一维聚类簇中心（analyze 自包含实现，与 ocr.py 解耦）。"""
+    if not values:
+        return []
+    vals = sorted(values)
+    clusters: List[List[float]] = [[vals[0]]]
+    for v in vals[1:]:
+        if v - clusters[-1][-1] > gap:
+            clusters.append([v])
+        else:
+            clusters[-1].append(v)
+    return [sum(c) / len(c) for c in clusters]
+
+
+def font_size_clusters(items: List[Dict], gap: float = 6.0) -> List[Dict]:
+    """字号聚类；孤立值（count==1）标 consistent: false。"""
+    if not items:
+        return []
+    sizes = [it["font_size"] for it in items]
+    out = []
+    for c in cluster_centers(sizes, gap):
+        members = [it for it in items if abs(it["font_size"] - c) <= gap / 2 + 0.5]
+        out.append({
+            "size": round(c, 1),
+            "count": len(members),
+            "texts": [m["text"] for m in members],
+            "consistent": len(members) >= 2,
+        })
+    out.sort(key=lambda d: -d["count"])
+    return out
+
+
+def alignment_notes(items: List[Dict], min_group: int = 3) -> List[Dict]:
+    """左（x1）/右（x2）/居中（中心 x）三向对齐聚类；≥min_group 成组。"""
+    notes: List[Dict] = []
+    for key, axis in (("left_align_group", 0), ("right_align_group", 2), ("center_align_group", None)):
+        if axis is None:
+            vals = [(it["box"][0] + it["box"][2]) / 2 for it in items]
+        else:
+            vals = [it["box"][axis] for it in items]
+        for c in cluster_centers(vals, gap=6.0):
+            count = sum(1 for v in vals if abs(v - c) <= 3.5)
+            if count >= min_group:
+                notes.append({"type": key, "x": round(c, 1), "elements": count})
+    return notes
+
+
+def dominant_colors(img: Image.Image, n: int = 5) -> List[Dict]:
+    """降采样 64×64 后 k-means 主色；占比最大者标 role="bg"（启发式）。"""
+    px = np.asarray(img.resize((64, 64))).reshape(-1, 3)
+    clusters = kmeans_colors(px, k=n)
+    total = sum(c[1] for c in clusters) or 1
+    out = []
+    for i, (rgb, count) in enumerate(clusters):
+        out.append({
+            "hex": "#%02X%02X%02X" % rgb,
+            "pct": round(100.0 * count / total, 1),
+            "role": "bg" if i == 0 else None,
+        })
+    return out
