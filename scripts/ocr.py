@@ -160,7 +160,7 @@ def load_images(path: str) -> Iterator[Tuple[Image.Image, int, int]]:
         total = doc.page_count
         for i, page in enumerate(doc, start=1):
             r = page.rect
-            scale = min(1.0, (MAX_PDF_PIXELS / (r.width * r.height)) ** 0.5)
+            scale = min(2.0, (MAX_PDF_PIXELS / (r.width * r.height)) ** 0.5)
             pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
             yield Image.frombytes("RGB", (pix.width, pix.height), pix.samples), i, total
         doc.close()

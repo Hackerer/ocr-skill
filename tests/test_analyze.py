@@ -81,6 +81,9 @@ def test_engine_params_match_ocr():
     assert ae.cfg.EngineConfig.onnxruntime.use_coreml is False
     assert oe.cfg.EngineConfig.onnxruntime.use_coreml is False
     assert ae.cfg.Rec.ocr_version == oe.cfg.Rec.ocr_version
+    assert ae.cfg.Det.ocr_version == oe.cfg.Det.ocr_version
+    assert ae.cfg.Det.model_type == oe.cfg.Det.model_type
+    assert ae.cfg.Rec.model_type == oe.cfg.Rec.model_type
 
 
 from PIL import Image

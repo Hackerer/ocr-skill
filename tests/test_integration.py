@@ -1,4 +1,6 @@
 """集成测试：真实调用 PP-OCRv6（需先跑过 --smoke 完成模型下载）"""
+import pytest
+
 from image_factory import make_text_image, make_ui_image
 from ocr import build_engine, ocr_file, sort_lines_reading_order, warmup
 
@@ -17,6 +19,7 @@ def _texts(results):
     return [ln["text"] for r in results for ln in r["lines"]]
 
 
+@pytest.mark.integration
 def test_english_invoice_text_mode(tmp_path):
     p = make_text_image(tmp_path / "invoice.png")
     results = ocr_file(get_engine(), p)
@@ -27,6 +30,7 @@ def test_english_invoice_text_mode(tmp_path):
     assert "1234" in joined.replace(",", "").replace(" ", "") or "1,234" in joined
 
 
+@pytest.mark.integration
 def test_chinese_and_reading_order(tmp_path):
     p = make_text_image(tmp_path / "cn.png", title="第一行标题", body="第二行正文内容")
     results = ocr_file(get_engine(), p)
@@ -40,6 +44,7 @@ def test_chinese_and_reading_order(tmp_path):
     assert "第二行" in joined or "正文" in joined
 
 
+@pytest.mark.integration
 def test_json_mode_has_coords(tmp_path):
     p = make_text_image(tmp_path / "j.png")
     results = ocr_file(get_engine(), p)
@@ -56,6 +61,7 @@ def test_json_mode_has_coords(tmp_path):
     assert ys == sorted(ys)
 
 
+@pytest.mark.integration
 def test_pdf_multi_page(tmp_path):
     import pymupdf as fitz
     from ocr import load_images
@@ -74,6 +80,7 @@ def test_pdf_multi_page(tmp_path):
     assert any("Page" in ln["text"] for r in results for ln in r["lines"])
 
 
+@pytest.mark.integration
 def test_table_mode(tmp_path):
     from image_factory import find_font
     from ocr import build_tsv
