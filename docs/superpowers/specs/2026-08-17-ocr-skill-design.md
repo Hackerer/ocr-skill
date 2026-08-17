@@ -63,7 +63,7 @@ CLI 提供 `--model-type tiny|small|medium`（默认 medium）与 `--fast` 快�
   不依赖包默认值，保证确定性，未来版本升级不漂移。
 - `Global.log_level: "error"`，stdout 只输出结果，日志/错误走 stderr。
 
-### 2.3 推理参数（官方默认即最佳）
+### 2.3 推理参数（官方默认即最佳；仅 text_score 一处有意覆盖，见下行）
 
 | 参数 | 值 | 说明 |
 |---|---|---|
@@ -79,7 +79,7 @@ CLI 提供 `--model-type tiny|small|medium`（默认 medium）与 `--fast` 快�
 1. 引擎单例：进程内只初始化一次 `RapidOCR`，多文件/多 PDF 页共用。
 2. 启动预热：初始化后用**内置含文字小图**（如 PIL 绘制的 128px"OCR 测试"图）跑一次完整管线（det→cls→rec），不计时——1px 空白图 det 无框时 rec 不会执行，预热不完整。
 3. 批量处理：多文件/多页一次调用完成，rec 裁剪自动走 batch（batch=6）。
-4. 图像缩放统一策略：**依赖 rapidocr 内置预处理**（`use_preprocess_img: true` + `max_side_len: 2000`），不在 ocr.py 重复实现缩放；PDF 页渲染目标约 200dpi 或像素量 ~2MP 上限，保证文本清晰且不触发过大图。
+4. 图像缩放统一策略：**依赖 rapidocr 内置预处理**（`use_preprocess_img: true` + `max_side_len: 2000`），不在 ocr.py 重复实现缩放；PDF 页渲染目标为**像素量 ~2MP 上限**（A4 约 150dpi），保证文本清晰且低于内置 2000px 上限。
 5. 首次下载：`venv_setup.sh` 安装依赖后立即跑一次烟雾测试（同内置预热图）触发模型下载并校验，之后完全离线。
 
 ## 3. 总体架构
@@ -174,6 +174,8 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
 
 **自包含设计**：analyze.py 内部复用 rapidocr 完成检测+识别拿到文本块（含 bbox/字号），再叠加像素分析，一条命令完成全部四项检查，不与 ocr.py 产生调用耦合（避免 LLM 为了审查要跑两次脚本）。
 
+**输入约束**：analyze.py **仅接受图片文件**（不支持 PDF）；如用户要求对 PDF 页面做设计审查，由 SKILL.md 指导先渲染页面为图片再调用。
+
 ```json
 {
   "file": "ui.png",
@@ -234,7 +236,7 @@ description: 图片/截图/PDF/扫描件 文字识别与结构理解...
 1. **指令下沉为可执行契约**：写"运行这个命令 → 得到这个格式 → 这样解读"，不写抽象原则。
 2. **显式决策表**：用户意图 → 命令/模式，用表格列清楚。
 3. **低置信度引导**：`⟦低置信⟧`/`low_conf` ≠ 错误，是让模型复核或向用户说明，不是删除。
-4. **token 预算提示**：>3 张图或 >10 页 PDF 先纯文本模式，需要布局再补 `--json`。
+4. **token 预算提示**：默认模式即纯文本。>3 张图或 >10 页 PDF 时**不要**全量 `--json`（token 过大）；确有布局/审查需求再对**单文件**补 `--json` 或 analyze.py。
 5. **错误恢复**：脚本报错先看 stderr；venv 未建 → 先跑 setup，写死在 SKILL.md。
 
 ## 6. 验证方案（skill-creator 双跑流程）
@@ -260,7 +262,7 @@ description: 图片/截图/PDF/扫描件 文字识别与结构理解...
 
 ## 8. 实施顺序（供 writing-plans 参考）
 
-1. git init + 目录骨架
+1. git init + 目录骨架（含 `.gitignore`：`.venv/`、`models/` 缓存、测试产物）
 2. venv_setup.sh（uv venv + 依赖 + 预热下载）
 3. ocr.py（引擎封装 → 预处理 → 识别 → 阅读顺序 → 三模式输出）
 4. analyze.py（四检查项）
