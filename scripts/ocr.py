@@ -238,6 +238,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             if args.table:
                 print(header)
                 print(build_tsv(r["lines"]))
+                print("（提示：列边界取自 x1，右对齐数值列可能碎列；如需精确请用 --json 按 box 推理）")
             else:
                 print(header)
                 print(render_text(r["lines"]))
