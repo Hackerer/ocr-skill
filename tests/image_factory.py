@@ -38,3 +38,30 @@ def make_ui_image(path, size=(640, 480)):
     d.text((40, 220), "立即购买", font=find_font(24), fill="white")
     img.save(path)
     return str(path)
+
+
+def make_table_image(path, size=(600, 200)):
+    """三列表格素材：名称/数量/价格 表头 + 苹果/3/9.90 数据行（供 eval 用例 2）。"""
+    img = Image.new("RGB", size, "white")
+    d = ImageDraw.Draw(img)
+    f = find_font(24)
+    d.text((20, 20), "名称", font=f, fill="black")
+    d.text((250, 20), "数量", font=f, fill="black")
+    d.text((400, 20), "价格", font=f, fill="black")
+    d.text((20, 80), "苹果", font=f, fill="black")
+    d.text((250, 80), "3", font=f, fill="black")
+    d.text((400, 80), "9.90", font=f, fill="black")
+    img.save(path)
+    return str(path)
+
+
+def make_pdf(path, pages: int = 2):
+    """多页 PDF 素材：每页 'Page Content' 文本（供 eval 用例 5）。"""
+    import pymupdf as fitz
+    doc = fitz.open()
+    for _ in range(pages):
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((72, 100), "Page Content", fontsize=24)
+    doc.save(path)
+    doc.close()
+    return str(path)
