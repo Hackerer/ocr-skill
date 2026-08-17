@@ -27,7 +27,9 @@ def build_engine(model_type: str = "medium") -> RapidOCR:
         "Det.model_type": mt,
         "Rec.ocr_version": OCRVersion.PPOCRV6,
         "Rec.model_type": mt,
+        "Global.text_score": 0.0,
         "Global.log_level": "error",
+        "EngineConfig.onnxruntime.use_coreml": False,
     })
 
 
@@ -38,7 +40,7 @@ def warmup(engine: RapidOCR) -> None:
     engine(np.asarray(img), text_score=0.0)
 
 
-def box_to_xyxy(box) -> List[float]:
+def box_to_xyxy(box: np.ndarray) -> List[float]:
     a = np.asarray(box, dtype=float)
     if a.shape == (4, 2):
         xs, ys = a[:, 0], a[:, 1]
@@ -67,7 +69,8 @@ def contrast_ratio(fg: Tuple[int, int, int], bg: Tuple[int, int, int]) -> float:
     return (l1 + 0.05) / (l2 + 0.05)
 
 
-def kmeans_colors(pixels: np.ndarray, k: int = 5, iters: int = 8, seed: int = 0
+def kmeans_colors(pixels: np.ndarray, k: int = 5, iters: int = 8,
+                  seed: int = 0  # 预留兼容位：确定性实现，无需 RNG
                   ) -> List[Tuple[Tuple[int, int, int], int]]:
     """确定性 k-means（numpy 手写，无 sklearn）。返回 [(rgb, 像素数)] 按数量降序。"""
     n = len(pixels)
@@ -98,7 +101,13 @@ def kmeans_colors(pixels: np.ndarray, k: int = 5, iters: int = 8, seed: int = 0
 
 def split_fg_bg(box: List[float], img: np.ndarray
                 ) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
-    """文本块内颜色聚类：面积大的簇=背景，面积小的簇=文字笔画（前景）。"""
+    """文本块内颜色聚类：面积大的簇=背景，面积小的簇=文字笔画（前景）。
+
+    输入契约：img 为 RGB ndarray (H, W, 3)；RGBA 需先 convert("RGB")。
+    初始种子取块内亮度极值（min/max），避免均匀采样在纯色/浅色区域塌缩成单簇。
+    纯色块（无文字）时 min/max 种子相同 → 单簇 → fg==bg 返回原色；
+    调用方（Task 9 contrast_check）以 fg == bg 判定"无法分离"并跳过，不输出伪造 ratio。
+    """
     x1, y1, x2, y2 = (int(v) for v in box)
     h, w = img.shape[:2]
     x1, y1 = max(0, x1), max(0, y1)
@@ -106,10 +115,18 @@ def split_fg_bg(box: List[float], img: np.ndarray
     region = img[y1:y2, x1:x2].reshape(-1, 3)
     if len(region) == 0:
         return (0, 0, 0), (255, 255, 255)
-    clusters = kmeans_colors(region, k=2)
-    if len(clusters) < 2:
-        c = clusters[0][0]
-        return c, c
-    bg = clusters[0][0]   # 面积最大
-    fg = clusters[1][0]   # 面积次之（文字笔画）
+    lum = 0.2126 * region[:, 0] + 0.7152 * region[:, 1] + 0.0722 * region[:, 2]
+    centers = np.stack([region[int(lum.argmin())], region[int(lum.argmax())]]).astype(float)
+    labels = np.zeros(len(region), dtype=int)
+    for _ in range(8):
+        d = ((region[:, None, :].astype(float) - centers[None, :, :]) ** 2).sum(axis=2)
+        labels = d.argmin(axis=1)
+        for j in range(2):
+            m = region[labels == j]
+            if len(m):
+                centers[j] = m.mean(axis=0)
+    counts = [int((labels == 0).sum()), int((labels == 1).sum())]
+    order = sorted(range(2), key=lambda j: -counts[j])
+    bg = tuple(int(v) for v in centers[order[0]])
+    fg = tuple(int(v) for v in centers[order[1]]) if counts[order[1]] > 0 else bg
     return fg, bg
