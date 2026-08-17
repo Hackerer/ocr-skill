@@ -153,10 +153,10 @@ def load_images(path: str) -> Iterator[Tuple[Image.Image, int, int]]:
     """图片或 PDF → (PIL Image, 页号, 总页数)。PDF 按像素量 ~2MP 上限渲染（§2.4）。"""
     p = Path(path)
     if p.suffix.lower() == ".pdf":
-        import fitz  # PyMuPDF
+        import pymupdf as fitz  # PyMuPDF（新包名导入，避免弃用别名 fitz 导入时 print 警告污染 stdout）
         doc = fitz.open(p)
         if doc.needs_pass:
-            raise RuntimeError(f"{path}: PDF 已加密，请先解密")
+            raise RuntimeError("PDF 已加密，请先解密")
         total = doc.page_count
         for i, page in enumerate(doc, start=1):
             r = page.rect
@@ -234,7 +234,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     for i, f in enumerate(args.files, start=1):
         file_results = [r for r in results_all if r["file"] == f]
         for r in file_results:
-            header = f"[文件{i}/{total_files}] 文件: {f}（页 {r['page']}/{len(file_results)}）"
+            header = f"[文件{i}/共{total_files}] 文件: {f}（页 {r['page']}/共{len(file_results)}）"
             if args.table:
                 print(header)
                 print(build_tsv(r["lines"]))
