@@ -28,7 +28,7 @@
 
 ## 2. 引擎选型：PP-OCRv6 via RapidOCR（rapidocr>=3.9.0）
 
-### 2.1 模型规格（实测确认）
+### 2.1 模型规格（源码实测确认）
 
 PP-OCRv6 在 rapidocr 中是多语种统一模型（`lang_type` 不影响选择），det/rec 各三个规格：
 
@@ -40,33 +40,47 @@ PP-OCRv6 在 rapidocr 中是多语种统一模型（`lang_type` 不影响选择�
 
 CLI 提供 `--model-type tiny|small|medium`（默认 medium）与 `--fast` 快捷参数（等价 `--model-type small`）。
 
-模型下载源：ModelScope（`https://www.modelscope.cn/models/RapidAI/RapidOCR`），SHA256 校验，国内可直连。
+**事实基准（rapidocr 3.9.2 `config.yaml` 实测）**：
+- 出厂默认即 `PP-OCRv6` + `small`——我们显式锁定 `medium` 是**精度决策**，不是修正默认 bug
+- **方向分类（cls）无 v6 版本**：官方默认沿用 `PP-OCRv4` mobile cls 模型，正确做法是不改动它
+- 模型下载源：ModelScope（`https://www.modelscope.cn/models/RapidAI/RapidOCR`），SHA256 校验，国内可直连
 
 ### 2.2 引擎配置
 
 - 推理引擎：`ONNXRUNTIME` + **CPU Provider**。**禁用 CoreML**：RapidOCR 官方 M2 实测（https://raw.githubusercontent.com/RapidAI/RapidOCRDocs/main/docs/blog/posts/inference_engine/compare_coreml_cpu_provider_perf.md）显示 CoreML 对 PP-OCR 系列模型优化不足——检测慢 3.5–6.8 倍、识别慢 3.2–14 倍（精度相同）。M3 同理。
 - 线程：保持默认 `-1`（自动用满 8 核）。
-- 显式锁定：`OCRVersion.PPOCRV6` + `ModelType.MEDIUM` 显式传入，不依赖包默认值，保证确定性。
-- `print_verbose=False`，stdout 只输出结果，日志/错误走 stderr。
+- **显式锁定写法**（3.9.x API 为 `RapidOCR(config_path=None, params: dict)`，点分键 + 枚举值，非关键字参数）：
+  ```python
+  from rapidocr import RapidOCR, ModelType, OCRVersion
+  engine = RapidOCR(params={
+      "Det.ocr_version": OCRVersion.PPOCRV6,
+      "Det.model_type": ModelType.MEDIUM,
+      "Rec.ocr_version": OCRVersion.PPOCRV6,
+      "Rec.model_type": ModelType.MEDIUM,
+      "Global.log_level": "error",   # 3.x 无 print_verbose，用 log_level 控制日志
+  })
+  ```
+  不依赖包默认值，保证确定性，未来版本升级不漂移。
+- `Global.log_level: "error"`，stdout 只输出结果，日志/错误走 stderr。
 
 ### 2.3 推理参数（官方默认即最佳）
 
 | 参数 | 值 | 说明 |
 |---|---|---|
-| `text_score` | 0.5 | 低于 0.5 标记 `low_conf`，**不丢弃**，由 LLM 判断 |
+| `text_score` | **0.0（实现层）** | ⚠️ rapidocr 内置 `filter_by_text_score` 会**过滤**低于阈值的行（源码实测）。为落实"低置信标记不丢弃"，ocr.py 将 `text_score` 设为 0.0 关闭内置过滤，自行以 0.5 为界打 `low_conf` 标记 |
 | `box_thresh` | 0.5 | 检测框保留阈值 |
 | `unclip_ratio` | 1.6 | 检测框外扩 |
 | `limit_side_len` | 736（`limit_type=min`） | 小图自动放大最小边到 736px，小字截图免手动预处理 |
-| `rec_batch_num` | 6 | 官方：batch 再大不提速反而可能变差 |
+| `rec_batch_num` | 6 | 官方：batch 再大不提速反而可能变差（rec 内部按宽高比排序分批，批内同宽高比更高效） |
 | `use_det/use_cls/use_rec` | true | 检测 + 方向分类 + 识别全开 |
 
 ### 2.4 生命周期与性能
 
 1. 引擎单例：进程内只初始化一次 `RapidOCR`，多文件/多 PDF 页共用。
-2. 启动预热：初始化后对 1px 空白图跑一次推理（不计时），把模型加载/线程池初始化顶到最前。
+2. 启动预热：初始化后用**内置含文字小图**（如 PIL 绘制的 128px"OCR 测试"图）跑一次完整管线（det→cls→rec），不计时——1px 空白图 det 无框时 rec 不会执行，预热不完整。
 3. 批量处理：多文件/多页一次调用完成，rec 裁剪自动走 batch（batch=6）。
-4. PDF 渲染：PyMuPDF，目标约 200dpi 或 ~2MP 上限。
-5. 首次下载：`venv_setup.sh` 安装依赖后立即跑一次烟雾测试触发模型下载并校验，之后完全离线。
+4. 图像缩放统一策略：**依赖 rapidocr 内置预处理**（`use_preprocess_img: true` + `max_side_len: 2000`），不在 ocr.py 重复实现缩放；PDF 页渲染目标约 200dpi 或像素量 ~2MP 上限，保证文本清晰且不触发过大图。
+5. 首次下载：`venv_setup.sh` 安装依赖后立即跑一次烟雾测试（同内置预热图）触发模型下载并校验，之后完全离线。
 
 ## 3. 总体架构
 
@@ -92,7 +106,7 @@ ocr/                                # ~/.agents/skills/ocr（符号链接到本�
 | 组件 | 职责 | 输入 → 输出 | 依赖 |
 |---|---|---|---|
 | `ocr.py` | PP-OCRv6 检测→方向→识别，阅读顺序排序 | 文件路径 → stdout 文本 / JSON / TSV | rapidocr, pymupdf, pillow, numpy |
-| `analyze.py` | 像素采样 + bbox 坐标分析 → 审查事实 | 图片路径 → stdout JSON | pillow, numpy |
+| `analyze.py` | 像素采样 + bbox 坐标分析 → 审查事实（内部复用 rapidocr 拿文本块，自包含） | 图片路径 → stdout JSON | rapidocr, pillow, numpy |
 | `venv_setup.sh` | 幂等初始化环境 + 模型预热 | 无 → 就绪的 .venv | uv |
 | `SKILL.md` | 教 LLM 何时触发、怎么调脚本、怎么用结果 | — | — |
 | references/* | 按需加载的格式文档与推断指南 | — | — |
@@ -113,8 +127,8 @@ ocr/                                # ~/.agents/skills/ocr（符号链接到本�
    ▼
 SKILL.md 判断意图
    ├─ 识别/理解/布局 → bash ocr.py <文件...> [--json|--table]
-   ├─ 设计审查        → bash ocr.py <文件> --json + analyze.py <文件> --checks all
-   └─ 两者都要        → 按需组合（analyze.py 单独跑，控制 token）
+   ├─ 设计审查        → bash analyze.py <文件>（自包含：内部 OCR + 像素分析，一条命令）
+   └─ 审查+布局都要   → analyze.py + ocr.py --json（先 analyze 出审查事实，需要布局再补 --json）
    │
    ▼
 LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/审查报告
@@ -124,15 +138,17 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
 
 **模式一：纯文本（默认）**
 ```
-[1/3] 文件: report.pdf（页1）
+[文件1/共3] 文件: report.pdf（页 1/共 10）
 第1行文本...
 第2行文本...                       ← 阅读顺序，空行分隔段落/块
 
-[1/3] 文件: report.pdf（页2）
+[文件1/共3] 文件: report.pdf（页 2/共 10）
 ...
 ```
+- 分隔头格式固定为 `[文件i/文件总数] 文件: <名>（页 p/总页数）`，文件序号与页码不混淆
 - 阅读顺序：y 坐标聚类 → 行分组 → 行内按 x 排序 → 行间按 y 排序
 - 低置信度文本保留，加 `⟦低置信⟧` 前缀标记
+- 结果源：`RapidOCROutput`（`.boxes`/`.txts`/`.scores`/`.elapse`；3.9.x `__call__` 返回对象而非旧版 tuple，boxes 已映射回原图坐标）
 
 **模式二：JSON（布局/UI 场景）**
 ```json
@@ -146,7 +162,8 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
   ]
 }
 ```
-- `box` = `[x1, y1, x2, y2]`，`font_size` ≈ 框高
+- `box` = `[x1, y1, x2, y2]`，为检测多边形（四顶点）的**外接矩形**，原图像素坐标系
+- `font_size` ≈ 框高（供字号层级推断）
 - 多文件多页 → 顶层数组
 
 **模式三：表格 TSV（`--table`）**
@@ -178,7 +195,7 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
 1. **对比度**：文本块中心像素为前景 + 周围环形采样为背景 → WCAG 公式算 ratio → 对照 4.5:1(AA)，只报事实不判断
 2. **字号一致性**：font_size 聚类，孤立值标 `consistent: false`
 3. **对齐一致性**：x1 聚类，≥3 元素成组，离群元素标出
-4. **配色统计**：降采样 k-means(≈5) 主色 + 占比
+4. **配色统计**：降采样 k-means(≈5) 主色 + 占比；`role` 为启发式提示（占比最大者标 `"bg"`），仅供 LLM 参考，不作断言
 
 ### 4.4 错误处理
 
@@ -186,9 +203,9 @@ LLM 基于结构化结果 → 摘要/翻译/提取字段/表格化/布局描述/
 |---|---|
 | 文件不存在/损坏 | stderr 报错，exit 1，LLM 向用户说明 |
 | 无检测框 | 输出空结果 + "未检测到文字"提示 |
-| analyze 遇无文字图 | 仅输出 palette |
+| analyze 遇无文字图 | 仅输出 palette（contrast_issues/alignment_notes 为空数组） |
 | PDF 加密 | 报错提示需先解密 |
-| 超大图 | 自动降采样到 ~2MP 再识别 |
+| 超大图 | 依赖 rapidocr 内置缩放（`use_preprocess_img` + `max_side_len=2000`），不自行降采样 |
 
 ## 5. SKILL.md 指令设计
 
@@ -234,6 +251,7 @@ description: 图片/截图/PDF/扫描件 文字识别与结构理解...
 
 | 边界 | 说明 | 对策 |
 |---|---|---|
+| 输入形式 | 仅支持本地文件路径；URL 需先下载（由模型自行 curl 完成） | SKILL.md 写明 |
 | 图标/图形/颜色语义 | OCR 拿不到 | 布局描述只讲位置/层级/文字，不虚构视觉元素 |
 | 手写体 | 准确率明显下降 | SKILL.md 声明；低置信标记兜底 |
 | 复杂表格（合并单元格/斜线表头） | TSV 会错位 | 自动提示改用原始 JSON 由 LLM 兜底推理 |
