@@ -21,6 +21,8 @@ MODEL_TYPES = {"tiny": ModelType.TINY, "small": ModelType.SMALL, "medium": Model
 
 
 def build_engine(model_type: str = "medium") -> RapidOCR:
+    if model_type not in MODEL_TYPES:
+        raise ValueError(f"未知 model_type: {model_type}，可选: {sorted(MODEL_TYPES)}")
     mt = MODEL_TYPES[model_type]
     return RapidOCR(params={
         "Det.ocr_version": OCRVersion.PPOCRV6,
@@ -229,10 +231,15 @@ def contrast_check(box: List[float], text: str, img: np.ndarray) -> Optional[Dic
     }
 
 
-def analyze_image(path: str, model_type: str = "medium") -> Dict:
-    """单张图片完整审查（spec §4.3：事实清单，结论由 LLM 下）。"""
-    engine = build_engine(model_type)
-    warmup(engine)
+def analyze_image(path: str, model_type: str = "medium",
+                  engine: Optional[RapidOCR] = None) -> Dict:
+    """单张图片完整审查（spec §4.3：事实清单，结论由 LLM 下）。
+
+    engine 由调用方传入并复用（§2.4.1 引擎单例）；不传时内部自建。
+    """
+    if engine is None:
+        engine = build_engine(model_type)
+        warmup(engine)
     img = Image.open(path).convert("RGB")
     arr = np.asarray(img)
     res = engine(arr, text_score=0.0)
@@ -265,13 +272,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("files", nargs="+", help="图片路径（不支持 PDF）")
     ap.add_argument("--model-type", choices=sorted(MODEL_TYPES), default="medium")
     args = ap.parse_args(argv)
+    engine = build_engine(args.model_type)
+    warmup(engine)
     out: List[Dict] = []
     for f in args.files:
         if not Path(f).exists():
             print(f"错误: 文件不存在 {f}", file=sys.stderr)
             return 1
         try:
-            out.append(analyze_image(f, args.model_type))
+            out.append(analyze_image(f, args.model_type, engine))
         except Exception as e:  # noqa: BLE001
             print(f"错误: {f}: {e}", file=sys.stderr)
             return 1

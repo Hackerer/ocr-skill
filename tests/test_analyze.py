@@ -209,4 +209,30 @@ def test_ui_review_no_text_only_palette(tmp_path):
     result = analyze_image(str(p))
     assert result["contrast_issues"] == []
     assert result["font_size_clusters"] == []
+    assert result["alignment_notes"] == []
     assert result["palette"][0]["hex"] == "#FFFFFF"
+
+
+from analyze import contrast_check
+
+
+def test_contrast_check_fail_aa():
+    img = np.full((60, 60, 3), (31, 41, 55), dtype=np.uint8)   # #1F2937 底
+    img[27:33, 20:40] = (107, 114, 128)                        # #6B7280 文字条
+    issue = contrast_check([20, 20, 40, 40], "测试", img)
+    assert issue is not None
+    assert issue["ratio"] < 4.5
+    assert issue["wcag"] == "AA 未达标(需≥4.5)"
+    assert issue["fg"] == "#6B7280" and issue["bg"] == "#1F2937"
+
+
+def test_contrast_check_pass_aa():
+    img = np.full((60, 60, 3), 255, dtype=np.uint8)
+    img[27:33, 20:40] = (0, 0, 0)
+    issue = contrast_check([20, 20, 40, 40], "黑字", img)
+    assert issue is not None and issue["wcag"] is None
+
+
+def test_contrast_check_fg_bg_same_returns_none():
+    img = np.full((60, 60, 3), 31, dtype=np.uint8)          # 纯色块
+    assert contrast_check([20, 20, 40, 40], "无字", img) is None
