@@ -177,3 +177,36 @@ def test_cluster_centers_matches_ocr_cluster_1d():
     samples = [[1.0, 2.0, 50.0, 51.0], [42.0], [], [10.0, 20.0], [51.0, 1.0, 50.0, -5.0, 2.0]]
     for s in samples:
         assert cluster_centers(s, gap=10.0) == cluster_1d(s, gap=10.0)
+
+
+import pytest
+
+from analyze import analyze_image
+
+
+@pytest.mark.integration
+def test_ui_review_full(tmp_path):
+    from image_factory import make_ui_image
+    p = make_ui_image(tmp_path / "ui.png")
+    result = analyze_image(str(p))
+    # 低对比度标题被检出
+    assert any(i["text"] == "商品详情" or "商品" in i["text"]
+               for i in result["contrast_issues"]), result["contrast_issues"]
+    # 深色背景为主色
+    assert result["palette"][0]["role"] == "bg"
+    # 字号至少两簇（标题 40px vs 按钮 24px）
+    assert len(result["font_size_clusters"]) >= 2
+    # 三个文本 x1 相同 → 左对齐组
+    assert any(n["type"] == "left_align_group" and n["elements"] >= 3
+               for n in result["alignment_notes"])
+
+
+@pytest.mark.integration
+def test_ui_review_no_text_only_palette(tmp_path):
+    from PIL import Image
+    p = tmp_path / "blank.png"
+    Image.new("RGB", (200, 100), (255, 255, 255)).save(p)
+    result = analyze_image(str(p))
+    assert result["contrast_issues"] == []
+    assert result["font_size_clusters"] == []
+    assert result["palette"][0]["hex"] == "#FFFFFF"

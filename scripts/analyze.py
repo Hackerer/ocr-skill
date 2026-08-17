@@ -206,3 +206,78 @@ def dominant_colors(img: Image.Image, n: int = 5) -> List[Dict]:
             "role": "bg" if i == 0 else None,
         })
     return out
+
+
+# ---------------------------------------------------------------- 审查主流程
+def contrast_check(box: List[float], text: str, img: np.ndarray) -> Optional[Dict]:
+    """单个文本块对比度事实；wcag 为 None 表示通过 AA。
+
+    若 fg == bg（无法分离前景/背景，如纯色块），返回 None 由调用方跳过——
+    不输出伪造 ratio（T7 审查修正：灰字白底种子塌缩曾产出合成色 + ratio 恒 1.0）。
+    """
+    fg, bg = split_fg_bg(box, img)
+    if fg == bg:
+        return None
+    ratio = contrast_ratio(fg, bg)
+    return {
+        "text": text,
+        "box": [round(v, 1) for v in box],
+        "fg": "#%02X%02X%02X" % fg,
+        "bg": "#%02X%02X%02X" % bg,
+        "ratio": round(ratio, 2),
+        "wcag": None if ratio >= 4.5 else "AA 未达标(需≥4.5)",
+    }
+
+
+def analyze_image(path: str, model_type: str = "medium") -> Dict:
+    """单张图片完整审查（spec §4.3：事实清单，结论由 LLM 下）。"""
+    engine = build_engine(model_type)
+    warmup(engine)
+    img = Image.open(path).convert("RGB")
+    arr = np.asarray(img)
+    res = engine(arr, text_score=0.0)
+    items: List[Dict] = []
+    if res.boxes is not None:
+        for box, txt, score in zip(res.boxes, res.txts, res.scores):
+            b = box_to_xyxy(box)
+            items.append({
+                "text": txt,
+                "conf": float(score),
+                "font_size": round(b[3] - b[1], 1),
+                "box": b,
+            })
+    contrast_issues = []
+    for it in items:
+        issue = contrast_check(it["box"], it["text"], arr)
+        if issue is not None and issue["wcag"] is not None:
+            contrast_issues.append(issue)
+    return {
+        "file": path,
+        "palette": dominant_colors(img),
+        "contrast_issues": contrast_issues,
+        "font_size_clusters": font_size_clusters(items),
+        "alignment_notes": alignment_notes(items),
+    }
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    ap = argparse.ArgumentParser(prog="analyze", description="设计审查：对比度/字号/对齐/配色 → 事实清单 JSON（仅图片）")
+    ap.add_argument("files", nargs="+", help="图片路径（不支持 PDF）")
+    ap.add_argument("--model-type", choices=sorted(MODEL_TYPES), default="medium")
+    args = ap.parse_args(argv)
+    out: List[Dict] = []
+    for f in args.files:
+        if not Path(f).exists():
+            print(f"错误: 文件不存在 {f}", file=sys.stderr)
+            return 1
+        try:
+            out.append(analyze_image(f, args.model_type))
+        except Exception as e:  # noqa: BLE001
+            print(f"错误: {f}: {e}", file=sys.stderr)
+            return 1
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
