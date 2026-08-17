@@ -194,3 +194,17 @@ def test_render_json_roundtrip():
     parsed = _json.loads(render_json(results))
     assert isinstance(parsed, list)
     assert parsed[0]["lines"][0]["box"] == [0, 0, 5, 5]
+
+
+from PIL import Image
+from ocr import load_images
+
+
+def test_load_images_single_image(tmp_path):
+    p = tmp_path / "t.png"
+    Image.new("RGB", (64, 32), "white").save(p)
+    pages = list(load_images(str(p)))
+    assert len(pages) == 1
+    img, page, total = pages[0]
+    assert img.size == (64, 32)
+    assert (page, total) == (1, 1)

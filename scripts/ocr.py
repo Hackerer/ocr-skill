@@ -146,3 +146,103 @@ def build_tsv(items: List[Dict]) -> str:
             cells[idx] = (cells[idx] + " " + it["text"]).strip()
         out.append("\t".join(cells))
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------- 输入
+def load_images(path: str) -> Iterator[Tuple[Image.Image, int, int]]:
+    """图片或 PDF → (PIL Image, 页号, 总页数)。PDF 按像素量 ~2MP 上限渲染（§2.4）。"""
+    p = Path(path)
+    if p.suffix.lower() == ".pdf":
+        import fitz  # PyMuPDF
+        doc = fitz.open(p)
+        if doc.needs_pass:
+            raise RuntimeError(f"{path}: PDF 已加密，请先解密")
+        total = doc.page_count
+        for i, page in enumerate(doc, start=1):
+            r = page.rect
+            scale = min(1.0, (MAX_PDF_PIXELS / (r.width * r.height)) ** 0.5)
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
+            yield Image.frombytes("RGB", (pix.width, pix.height), pix.samples), i, total
+        doc.close()
+    else:
+        yield Image.open(p).convert("RGB"), 1, 1
+
+
+def ocr_file(engine: RapidOCR, path: str) -> List[Dict]:
+    """单个文件 → JSON 结构列表（一文件可能多页）。text_score=0.0 关闭内置过滤（§2.3）。"""
+    results: List[Dict] = []
+    for img, page, _total in load_images(path):
+        arr = np.asarray(img)
+        res = engine(arr, text_score=0.0)
+        items: List[Dict] = []
+        if res.boxes is not None:
+            for box, txt, score in zip(res.boxes, res.txts, res.scores):
+                b = box_to_xyxy(box)
+                items.append({
+                    "text": txt,
+                    "conf": round(float(score), 4),
+                    "font_size": round(b[3] - b[1], 1),
+                    "box": [round(v, 1) for v in b],
+                    "low_conf": bool(score < LOW_CONF_THRESHOLD),
+                })
+        h, w = arr.shape[:2]
+        results.append({
+            "file": path, "page": page,
+            "width": int(w), "height": int(h),
+            "lines": items,
+        })
+    return results
+
+
+# ---------------------------------------------------------------- CLI
+def main(argv: Optional[List[str]] = None) -> int:
+    ap = argparse.ArgumentParser(prog="ocr", description="图片/PDF OCR：阅读顺序文本 / JSON / 表格 TSV")
+    ap.add_argument("files", nargs="*", help="图片或 PDF 路径（本地文件）")
+    ap.add_argument("--json", action="store_true", help="JSON 输出（含坐标/字号/置信度）")
+    ap.add_argument("--table", action="store_true", help="表格 TSV 输出")
+    ap.add_argument("--model-type", choices=sorted(MODEL_TYPES), default="medium")
+    ap.add_argument("--fast", action="store_true", help="等价 --model-type small")
+    ap.add_argument("--smoke", action="store_true", help="模型预热烟雾测试（下载模型/SHA256 校验）")
+    args = ap.parse_args(argv)
+
+    model_type = "small" if args.fast else args.model_type
+    engine = build_engine(model_type)
+    warmup(engine)
+
+    if args.smoke:
+        print("SMOKE OK")
+        return 0
+    if not args.files:
+        ap.error("至少需要一个文件")
+
+    results_all: List[Dict] = []
+    for f in args.files:
+        if not Path(f).exists():
+            print(f"错误: 文件不存在 {f}", file=sys.stderr)
+            return 1
+        try:
+            results_all.extend(ocr_file(engine, f))
+        except Exception as e:  # noqa: BLE001
+            print(f"错误: {f}: {e}", file=sys.stderr)
+            return 1
+
+    if args.json:
+        print(render_json(results_all))
+        return 0
+
+    total_files = len(args.files)
+    for i, f in enumerate(args.files, start=1):
+        file_results = [r for r in results_all if r["file"] == f]
+        for r in file_results:
+            header = f"[文件{i}/{total_files}] 文件: {f}（页 {r['page']}/{len(file_results)}）"
+            if args.table:
+                print(header)
+                print(build_tsv(r["lines"]))
+            else:
+                print(header)
+                print(render_text(r["lines"]))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
