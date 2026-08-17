@@ -86,3 +86,27 @@ def test_reading_order_xy():
     ]
     ordered = sort_lines_reading_order(items)
     assert [i["text"] for i in ordered] == ["L1", "R1", "L2"]
+
+
+def test_group_rows_tall_box_does_not_absorb_short_line():
+    # 高框（标题）与紧贴其下的矮行必须分行（回归 I-1）
+    items = [
+        _item("标题", [10, 20, 300, 100]),     # h=80, cy=60
+        _item("说明", [10, 100, 80, 108]),     # h=8, cy=104（紧贴）
+        _item("另一行", [10, 150, 100, 170]),  # h=20, cy=160
+    ]
+    rows = group_into_rows(items)
+    assert len(rows) == 3
+    assert [r["text"] for r in rows[0]] == ["标题"]
+    assert [r["text"] for r in rows[1]] == ["说明"]
+
+
+def test_group_rows_boundary_equal_threshold_same_row():
+    # 边界语义：|Δcy| 恰好等于阈值 → 归一行（与 cluster_1d 的"相等不分簇"一致）
+    items = [
+        _item("上", [10, 10, 100, 30]),    # h=20, cy=20
+        _item("下", [10, 22, 100, 42]),    # h=20, cy=32, |Δ|=12 == max(min(20,20)*0.6,8)=12
+    ]
+    rows = group_into_rows(items)
+    assert len(rows) == 1
+    assert sorted(r["text"] for r in rows[0]) == ["上", "下"]
