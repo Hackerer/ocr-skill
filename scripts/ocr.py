@@ -27,13 +27,20 @@ MODEL_TYPES = {"tiny": ModelType.TINY, "small": ModelType.SMALL, "medium": Model
 # ---------------------------------------------------------------- 引擎
 def build_engine(model_type: str = "medium") -> RapidOCR:
     """按设计文档 §2.2：显式锁定 PP-OCRv6 + 指定规格；log_level=error 保证 stdout 干净。"""
+    if model_type not in MODEL_TYPES:
+        raise ValueError(f"未知 model_type: {model_type}，可选: {sorted(MODEL_TYPES)}")
     mt = MODEL_TYPES[model_type]
     return RapidOCR(params={
         "Det.ocr_version": OCRVersion.PPOCRV6,
         "Det.model_type": mt,
         "Rec.ocr_version": OCRVersion.PPOCRV6,
         "Rec.model_type": mt,
+        # §2.3：text_score=0.0 关闭内置过滤（低置信由我方以 0.5 为界打标记），
+        # 随引擎单例固化，避免后续 engine(img) 调用静默回到默认 0.5 过滤。
+        "Global.text_score": 0.0,
         "Global.log_level": "error",
+        # §2.2 确定性：显式禁用 CoreML（rapidocr 3.9.2 默认即 false，锁定防默认翻转）。
+        "EngineConfig.onnxruntime.use_coreml": False,
     })
 
 
